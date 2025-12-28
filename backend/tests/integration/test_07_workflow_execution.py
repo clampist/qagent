@@ -208,15 +208,15 @@ class TestWorkflowExecution:
             assert "passed_count" in summary
             assert "failed_count" in summary
             
-            # 6. Execute _review_test_results (LLM-based review)
+            # 6. Execute _agent_chain_review (LLM-based review)
             print(f"\n{'='*60}")
-            print("6. Running _review_test_results Step (LLM Review)")
+            print("6. Running _agent_chain_review Step (LLM Review)")
             print(f"{'='*60}")
             
-            result = await workflow_manager._review_test_results(state)
+            result = await workflow_manager._agent_chain_review(state)
             state = merge_node_result(state, result)
             
-            # Verify _review_test_results results
+            # Verify _agent_chain_review results
             assert state.stage == TaskStage.RESULT_CHECK
             assert hasattr(state, 'test_review')
             assert isinstance(state.test_review, dict)

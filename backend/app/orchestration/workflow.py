@@ -125,13 +125,13 @@ class WorkflowManager:
         # Store initial state values to preserve them across node calls
         self._initial_state_cache: Dict[str, Dict[str, Any]] = {}
     
-    def _get_langsmith_trace_url_immediate(self, task_id: str) -> Optional[str]:
-        """Get LangSmith trace URL immediately after workflow starts (for quick response).
-        
-        This method tries to get the trace URL quickly without waiting for completion.
+    def _get_langsmith_trace_url(self, task_id: str, wait_for_completion: bool = False) -> Optional[str]:
+        """Get LangSmith trace URL for the workflow execution.
         
         Args:
             task_id: Task ID to search for in LangSmith
+            wait_for_completion: If True, wait for all tracers to finish before getting URL.
+                               If False, get URL immediately (may be less accurate).
             
         Returns:
             LangSmith trace URL if found, None otherwise
@@ -150,6 +150,13 @@ class WorkflowManager:
         try:
             from langsmith import Client
             
+            # Wait for tracers if requested
+            if wait_for_completion:
+                from langchain_core.tracers.langchain import wait_for_all_tracers
+                import time
+                wait_for_all_tracers()
+                time.sleep(1)  # Give a small delay to ensure traces are indexed
+            
             # Initialize LangSmith client
             client = Client(
                 api_key=settings.langsmith_api_key,
@@ -159,17 +166,20 @@ class WorkflowManager:
             # Search for runs related to this task
             project_name = settings.langsmith_project or "default"
             
+            # Use different limits based on whether we're waiting
+            limit = 5 if wait_for_completion else 1
+            
             # Get the most recent run (should be our workflow execution)
             runs = list(client.list_runs(
                 project_name=project_name,
-                limit=1,
+                limit=limit,
                 execution_order=1  # Get root runs only
             ))
             
             if not runs:
                 # Try without project filter
                 runs = list(client.list_runs(
-                    limit=1,
+                    limit=limit,
                     execution_order=1
                 ))
             
@@ -203,165 +213,29 @@ class WorkflowManager:
             return None
             
         except ImportError:
-            logger.debug("langsmith package not installed, cannot get trace URL")
+            if wait_for_completion:
+                logger.warning("langsmith package not installed, cannot get trace URL")
+            else:
+                logger.debug("langsmith package not installed, cannot get trace URL")
             return None
         except Exception as e:
-            logger.debug(f"Error getting LangSmith trace URL immediately: {e}")
-            return None
-    
-    def _get_langsmith_trace_url(self, task_id: str) -> Optional[str]:
-        """Get LangSmith trace URL for the workflow execution (after completion).
-        
-        Args:
-            task_id: Task ID to search for in LangSmith
-            
-        Returns:
-            LangSmith trace URL if found, None otherwise
-        """
-        from app.config import settings
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        # Check if LangSmith tracing is enabled
-        if not settings.langsmith_tracing or settings.langsmith_tracing.lower() != "true":
-            return None
-        
-        if not settings.langsmith_api_key:
-            return None
-        
-        try:
-            from langsmith import Client
-            from langchain_core.tracers.langchain import wait_for_all_tracers
-            import time
-            
-            # Wait for all tracers to finish submitting traces
-            wait_for_all_tracers()
-            # Give a small delay to ensure traces are indexed
-            time.sleep(1)
-            
-            # Initialize LangSmith client
-            client = Client(
-                api_key=settings.langsmith_api_key,
-                api_url=settings.langsmith_endpoint
-            )
-            
-            # Search for runs related to this task
-            # We'll search by project and look for recent runs
-            project_name = settings.langsmith_project or "default"
-            
-            # Get the most recent run (should be our workflow execution)
-            runs = list(client.list_runs(
-                project_name=project_name,
-                limit=5,
-                execution_order=1  # Get root runs only
-            ))
-            
-            if not runs:
-                # Try without project filter
-                runs = list(client.list_runs(
-                    limit=5,
-                    execution_order=1
-                ))
-            
-            if runs:
-                # Get the most recent run (first in the list)
-                latest_run = runs[0]
-                run_id = latest_run.id
-                
-                # Build LangSmith URL
-                # Extract organization ID from endpoint if available
-                endpoint = settings.langsmith_endpoint or "https://api.smith.langchain.com"
-                
-                # Parse endpoint to get base URL
-                if "eu.smith.langchain.com" in endpoint or (hasattr(latest_run, 'url') and latest_run.url and "eu.smith.langchain.com" in latest_run.url):
-                    base_url = "https://eu.smith.langchain.com"
-                else:
-                    base_url = "https://smith.langchain.com"
-                
-                # Try to get organization and project from the run
-                # If run has URL, use it directly
-                if hasattr(latest_run, 'url') and latest_run.url:
-                    return latest_run.url
-                
-                # Otherwise, construct URL manually
-                # We need org_id and project_id from settings or run metadata
-                # For now, use a simpler approach: construct URL with run_id
-                if project_name and project_name != "default":
-                    # Try to construct URL with project name
-                    # Format: https://{base}/o/{org_id}/projects/p/{project_id}?peek={run_id}
-                    # Since we don't have org_id easily accessible, use the run's URL if available
-                    # Or construct a simpler URL
-                    url = f"{base_url}/o/default/projects/p/{project_name}?peek={run_id}"
-                    return url
-                else:
-                    # Fallback: use run ID directly
-                    url = f"{base_url}/traces/{run_id}"
-                    return url
-            
-            return None
-            
-        except ImportError:
-            logger.warning("langsmith package not installed, cannot get trace URL")
-            return None
-        except Exception as e:
-            logger.warning(f"Error getting LangSmith trace URL: {e}")
+            if wait_for_completion:
+                logger.warning(f"Error getting LangSmith trace URL: {e}")
+            else:
+                logger.debug(f"Error getting LangSmith trace URL: {e}")
             return None
         
     def _normalize_state(self, state) -> Dict[str, Any]:
         """Normalize state to dict (handle both WorkflowState object and dict)."""
         import logging
-        import json
         logger = logging.getLogger(__name__)
         
-        # #region agent log
-        try:
-            with open('/Users/clampist/Workspace/AI/QAgent/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({
-                    "sessionId": "debug-session",
-                    "runId": "run1",
-                    "hypothesisId": "A",
-                    "location": "workflow.py:_normalize_state",
-                    "message": "State type and values before normalization",
-                    "data": {
-                        "state_type": type(state).__name__,
-                        "is_WorkflowState": isinstance(state, WorkflowState),
-                        "is_dict": isinstance(state, dict),
-                        "repo_full_name": getattr(state, 'repo_full_name', state.get('repo_full_name') if isinstance(state, dict) else None) if hasattr(state, 'repo_full_name') or isinstance(state, dict) else None,
-                        "pr_number": getattr(state, 'pr_number', state.get('pr_number') if isinstance(state, dict) else None) if hasattr(state, 'pr_number') or isinstance(state, dict) else None,
-                        "workspace_path": getattr(state, 'workspace_path', state.get('workspace_path') if isinstance(state, dict) else None) if hasattr(state, 'workspace_path') or isinstance(state, dict) else None,
-                        "state_id": id(state)
-                    },
-                    "timestamp": int(__import__('time').time() * 1000)
-                }) + '\n')
-        except Exception:
-            pass
-        # #endregion
         
         if isinstance(state, WorkflowState):
             result = state.to_dict()
             logger.debug(f"_normalize_state: Converted WorkflowState to dict, keys: {list(result.keys())}")
             logger.debug(f"_normalize_state: repo_full_name={result.get('repo_full_name')}, pr_number={result.get('pr_number')}, workspace_path={result.get('workspace_path')}")
             
-            # #region agent log
-            try:
-                with open('/Users/clampist/Workspace/AI/QAgent/.cursor/debug.log', 'a') as f:
-                    f.write(json.dumps({
-                        "sessionId": "debug-session",
-                        "runId": "run1",
-                        "hypothesisId": "A",
-                        "location": "workflow.py:_normalize_state",
-                        "message": "After WorkflowState.to_dict() conversion",
-                        "data": {
-                            "repo_full_name": result.get('repo_full_name'),
-                            "pr_number": result.get('pr_number'),
-                            "workspace_path": result.get('workspace_path'),
-                            "all_keys": list(result.keys())
-                        },
-                        "timestamp": int(__import__('time').time() * 1000)
-                    }) + '\n')
-            except Exception:
-                pass
-            # #endregion
             
             return result
         
@@ -405,28 +279,6 @@ class WorkflowManager:
     
     def _build_graph(self) -> StateGraph:
         """Build LangGraph workflow graph."""
-        import json
-        # #region agent log
-        try:
-            with open('/Users/clampist/Workspace/AI/QAgent/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({
-                    "sessionId": "debug-session",
-                    "runId": "run1",
-                    "hypothesisId": "D",
-                    "location": "workflow.py:_build_graph",
-                    "message": "Creating StateGraph with WorkflowStateDict TypedDict",
-                    "data": {
-                        "schema_type": "WorkflowStateDict TypedDict",
-                        "default_pr_number": None,
-                        "default_repo_full_name": None,
-                        "default_workspace_path": None
-                    },
-                    "timestamp": int(__import__('time').time() * 1000)
-                }) + '\n')
-        except Exception:
-            pass
-        # #endregion
-        
         # Use TypedDict instead of class to prevent LangGraph from creating default instances
         # that overwrite initial state values
         workflow = StateGraph(WorkflowStateDict)
@@ -444,7 +296,7 @@ class WorkflowManager:
         workflow.add_node("setup_e2e_environment", self._setup_e2e_environment)  # New node
         workflow.add_node("run_tests", self._run_tests)
         workflow.add_node("check_results", self._check_results)
-        workflow.add_node("review_test_results", self._review_test_results)  # New review node
+        workflow.add_node("agent_chain_review", self._agent_chain_review)  # New review node
         workflow.add_node("create_pr", self._create_pr)
         workflow.add_node("handle_error", self._handle_error)
         
@@ -461,9 +313,9 @@ class WorkflowManager:
         workflow.add_edge("develop_cases", "setup_e2e_environment")  # Added
         workflow.add_edge("setup_e2e_environment", "run_tests")  # Added
         workflow.add_edge("run_tests", "check_results")
-        workflow.add_edge("check_results", "review_test_results")  # Always review after check
+        workflow.add_edge("check_results", "agent_chain_review")  # Always review after check
         workflow.add_conditional_edges(
-            "review_test_results",
+            "agent_chain_review",
             self._should_retry_or_proceed,
             {
                 "create_pr": "create_pr",
@@ -523,7 +375,7 @@ class WorkflowManager:
         try:
             import time
             await asyncio.sleep(0.5)  # Wait 500ms for trace to be created
-            langsmith_trace_url = self._get_langsmith_trace_url_immediate(task_id)
+            langsmith_trace_url = self._get_langsmith_trace_url(task_id, wait_for_completion=False)
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -537,7 +389,6 @@ class WorkflowManager:
     async def _run_workflow(self, initial_state: WorkflowState):
         """Execute workflow with given initial state."""
         import logging
-        import json
         logger = logging.getLogger(__name__)
         
         try:
@@ -558,27 +409,6 @@ class WorkflowManager:
             }
             logger.debug(f"_run_workflow: Cached initial state values for task_id={task_id}: {self._initial_state_cache[task_id]}")
             
-            # #region agent log
-            try:
-                with open('/Users/clampist/Workspace/AI/QAgent/.cursor/debug.log', 'a') as f:
-                    f.write(json.dumps({
-                        "sessionId": "debug-session",
-                        "runId": "run1",
-                        "hypothesisId": "B",
-                        "location": "workflow.py:_run_workflow",
-                        "message": "Before graph.ainvoke - initial_dict values and cache",
-                        "data": {
-                            "repo_full_name": initial_dict.get('repo_full_name'),
-                            "pr_number": initial_dict.get('pr_number'),
-                            "workspace_path": initial_dict.get('workspace_path'),
-                            "cached_values": self._initial_state_cache.get(task_id, {}),
-                            "initial_dict_keys": list(initial_dict.keys())
-                        },
-                        "timestamp": int(__import__('time').time() * 1000)
-                    }) + '\n')
-            except Exception:
-                pass
-            # #endregion
             
             final_dict = await self.graph.ainvoke(initial_dict)
             
@@ -622,32 +452,8 @@ class WorkflowManager:
     async def _initialize(self, state) -> Dict[str, Any]:
         """Initialize workflow state."""
         import logging
-        import json
         logger = logging.getLogger(__name__)
         
-        # #region agent log
-        try:
-            with open('/Users/clampist/Workspace/AI/QAgent/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({
-                    "sessionId": "debug-session",
-                    "runId": "run1",
-                    "hypothesisId": "C",
-                    "location": "workflow.py:_initialize",
-                    "message": "Node received state (BEFORE normalize)",
-                    "data": {
-                        "state_type": type(state).__name__,
-                        "is_WorkflowState": isinstance(state, WorkflowState),
-                        "is_dict": isinstance(state, dict),
-                        "repo_full_name": getattr(state, 'repo_full_name', state.get('repo_full_name') if isinstance(state, dict) else None) if hasattr(state, 'repo_full_name') or isinstance(state, dict) else None,
-                        "pr_number": getattr(state, 'pr_number', state.get('pr_number') if isinstance(state, dict) else None) if hasattr(state, 'pr_number') or isinstance(state, dict) else None,
-                        "workspace_path": getattr(state, 'workspace_path', state.get('workspace_path') if isinstance(state, dict) else None) if hasattr(state, 'workspace_path') or isinstance(state, dict) else None,
-                        "state_id": id(state)
-                    },
-                    "timestamp": int(__import__('time').time() * 1000)
-                }) + '\n')
-        except Exception:
-            pass
-        # #endregion
         
         # Handle both dict and WorkflowState object
         state = self._normalize_state(state)
@@ -1099,8 +905,8 @@ class WorkflowManager:
             "metadata": metadata
         })
     
-    async def _review_test_results(self, state) -> Dict[str, Any]:
-        """Review test results using TestCheckerAgent (LLM-based review with feedback)."""
+    async def _agent_chain_review(self, state) -> Dict[str, Any]:
+        """Review test results using CaseCheckerAgent (LLM-based review with feedback)."""
         # Handle both dict and WorkflowState object
         state = self._normalize_state(state)
         import logging
