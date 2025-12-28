@@ -6,7 +6,13 @@
 
 ### 典型场景示例
 
-假设正在维护一个**邮件风险reviewer系统**，需要添加一个新功能：在现有的"高风险"和"低风险"之外，增加一个"中风险"分类。这个看似简单的需求升级，实际上需要：
+假设正在维护一个**邮件风险reviewer系统**，需要添加一个新功能：在现有的"高风险"和"低风险"之外，增加一个"中风险"分类。
+
+且目标系统中已经存在前端测试框架，需求在其基础上新增测试用例。
+
+![需求变更](docs/imgs/EmailRiskReviewer.png)
+
+这个看似简单的需求升级，实际上需要：
 
 1. **需求分析**：理解PR中的变更内容，识别需要测试的功能点
 2. **测试设计**：设计覆盖新功能的测试场景
@@ -150,7 +156,7 @@ cd backend
 - **立即查看**：Webhook响应中包含 `langsmith_trace_url`，可直接访问
 - **完成后查看**：工作流完成后，日志中会打印完整的LangSmith trace URL
 
-**示例**：[LangSmith Trace示例](https://eu.smith.langchain.com/public/9d8fee17-ea7b-4f9a-ad8d-579ec6768a83/r/019b66b2-46ba-7a73-b704-a4e8964b98c2)
+**示例**：<a href="https://eu.smith.langchain.com/public/9d8fee17-ea7b-4f9a-ad8d-579ec6768a83/r/019b66b2-46ba-7a73-b704-a4e8964b98c2" target="_blank" rel="noopener noreferrer">LangSmith Trace示例（点击打开公开链接）</a>
 
 ![LangGraph工作流Trace](docs/imgs/LangGraph.png)
 
