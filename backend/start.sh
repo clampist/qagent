@@ -124,7 +124,7 @@ echo -e "\nPress ${YELLOW}Ctrl+C${NC} to stop the server\n"
 # Start uvicorn with reload for development
 exec python3.12 -m uvicorn app.main:app \
     --host 0.0.0.0 \
-    --port 8000 \
+    --port 8080 \
     --reload \
-    --log-level debug
+    --log-level info
 
