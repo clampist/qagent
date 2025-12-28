@@ -363,7 +363,6 @@ LangSmith trace包含：
 ### 开发工具
 - **Cursor**：主要IDE，利用AI代码补全和对话功能
 - **Qoder**：辅助代码生成和重构工具
-- **Vibe Coding工具**：用于快速原型开发和代码生成
 
 ### 使用的大模型
 在开发过程中使用了以下大语言模型：
@@ -399,9 +398,9 @@ LangSmith trace包含：
 
 ## 📄 License
 
-[待添加]
+MIT
 
 ## 🤝 Contributing
 
-[待添加]
+clampist
 
